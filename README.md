@@ -6,6 +6,32 @@
    conda activate neo
    ```
 
+## Training Guide
+
+1. Configure the model checkpoint path in `run_experiment.py` (line 18):
+   ```python
+   model_dir = "/your/path/here"  # Update this path to save your checkpoint
+   ```
+
+2. Run the training script:
+   ```bash
+   python3 run_experiment.py /path/to/workload/experiment1/job/run1/ \
+    config/config_neo_job_default.yml
+   ```
+
+## Testing guide
+
+1. Configure the model checkpoint path in `test_neo.py` (line 18):
+   ```python
+   MODEL_DIR = "/your/path/here"  # Update this path to load your checkpoint
+   ```
+
+2. Run the testing script:
+   ```bash
+   python3 test_neo.py /path/to/workload/experiment1/job/run1/ \
+    config/config_neo_job_default.yml
+   ```
+
 ---
 
 # Learned Query Optimizer
