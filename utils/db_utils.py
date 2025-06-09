@@ -10,23 +10,21 @@ from moz_sql_parser import parse
 from plan import Plan
 
 DB_SETTINGS = """BEGIN;
-                SET enable_nestloop = off;
                 SET join_collapse_limit=20;
                 SET from_collapse_limit=20;
-                SET statement_timeout = 300000;
+                SET statement_timeout = 1200000;
                 COMMIT;
                 """
 
 LOG = logging.getLogger(__name__)
 
-
+import tqdm
 def build_and_save_optimizer_plans(env_config, path):
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
     db_data = env_config["db_data"]
     conn = psycopg2.connect(env_config["psycopg_connect_url"])
-    for q in db_data.keys():
-        print(q)
+    for q in tqdm.tqdm(db_data.keys()):
         p = Plan(*db_data[q])
         plan, _ = explain_plan_parser(
             p, p.initial_query, conn, exec_time=False)
@@ -333,6 +331,8 @@ def get_cost_plan(p, conn, db, exec_time=False):
     query = p.sql_query()
     try:
         cur.execute(DB_SETTINGS)
+        # Increase the statement timeout to 20 minutes
+        cur.execute("SET statement_timeout = 1200000;")
         cur.execute(
             f"EXPLAIN (FORMAT JSON{', ANALYZE' if exec_time else ''}) {query}")
         data = cur.fetchall()
@@ -375,6 +375,37 @@ def get_cost_plan(p, conn, db, exec_time=False):
         'Actual Total Time') if exec_time else query_plan.get('Total Cost')
     return cost
 
+def explain_analyze_plan(p, conn, db):
+    """
+    Parameters
+    ----------
+    p: plan.Plan
+        The plan object to be explained.
+    conn: psycopg2.extensions.connection
+        The database connection.
+    db: str
+        The name of the database.
+
+    Returns
+    -------
+    float
+        The actual total execution time of the plan.
+    """
+    cur = conn.cursor()
+    query = p.sql_query()
+    print(f"Executing query: {query}")
+    try:
+        cur.execute(DB_SETTINGS)
+        cur.execute(
+            f"EXPLAIN (FORMAT JSON, ANALYZE) {query}")
+        data = cur.fetchall()
+        query_plan = data[0][0][0]['Plan']
+        cur.close()
+    except Exception as e:
+        cur.close()
+        db_rollback(conn)
+        raise e
+    return data[0][0][0], query_plan.get('Actual Total Time')
 
 def explain_plan_parser(plan, query, conn, exec_time=False):
     """
@@ -430,6 +461,89 @@ def explain_plan_parser(plan, query, conn, exec_time=False):
     else:
         return p, query_plan.get('Total Cost')
 
+
+def explain_plan_parser_augmented(plan, query, conn, exec_time=False, planner_settings=None):
+    """
+    Augmented version of explain_plan_parser to generate multiple query plans for the same query
+    by applying different planner settings.
+
+    Parameters
+    ----------
+    plan: plan.Plan
+        The initial plan object.
+    query: str
+        The SQL query to be executed.
+    conn: psycopg2.extensions.connection
+        The database connection.
+    exec_time: bool, optional
+        Whether to include execution time in the plan (default: False).
+    planner_settings: list of dict, optional
+        List of planner settings to apply (default: None).
+    output_dir: Path, optional
+        Directory to save the generated plans (default: None).
+
+    Returns
+    -------
+    list of plan.Plan
+        List of generated plans.
+    list of float
+        List of actual total costs or execution times.
+    """
+    if planner_settings is None:
+        planner_settings = [
+            {}  # Default settings
+        ]
+
+    generated_plans = []
+    costs = []
+
+    cur = conn.cursor()
+
+    for settings in planner_settings:
+        try:
+            # Apply planner settings
+            for key, value in settings.items():
+                cur.execute(f"SET {key} = {value};")
+
+            # Execute EXPLAIN to get the query plan
+            cur.execute(
+                f"EXPLAIN (FORMAT JSON{', ANALYZE' if exec_time else ''}) {query}"
+            )
+            data = cur.fetchall()
+
+            # Parse the query plan
+            query_plan = data[0][0][0]['Plan']
+            list_of_joins, joins_info, _, alias_to_table, _ = parse_explain_json_to_list_of_nodes(
+                query_plan, index_cond_names=['Index Cond', 'Recheck Cond'], join_cond_names=['Join Filter', 'Hash Cond', 'Merge Cond']
+            )
+
+            # Create a new plan object
+            p = Plan(plan.query_tables, plan.alias_to_table, plan.query_join_conditions, plan.initial_query)
+
+            # Add join nodes to the plan
+            for node, (c1, c2) in list_of_joins:
+                join_info = joins_info[node]
+                info_dict = {
+                    'cost': join_info['Total Cost'],
+                    'time': join_info.get('Actual Total Time') or join_info.get('Actual Max Total Time'),
+                    'rows': join_info.get('Actual Rows'),
+                    'join_type': join_info.get('Node Type')
+                }
+                p.join(c1, c2, **info_dict)
+
+            # Append the generated plan and cost
+            generated_plans.append(p)
+            if exec_time:
+                costs.append(query_plan.get('Actual Total Time'))
+            else:
+                costs.append(query_plan.get('Total Cost'))
+
+        except Exception as e:
+            print(f"Error executing query with settings {settings}: {e}")
+            continue
+
+    cur.close()
+    return generated_plans, costs
 
 PSQL_NUMERIC_DTYPES = [
     'smallint', 'integer', 'bigint', 'decimal', 'numeric',

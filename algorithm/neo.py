@@ -13,6 +13,9 @@ import time
 from torch.utils.tensorboard import SummaryWriter
 import re
 import networkx as nx
+import pickle
+import os
+from pathlib import Path
 
 import logging
 LOG = logging.getLogger(__name__)
@@ -134,6 +137,9 @@ class EnvPlanHeap(EnvBase):
         return super().reset(idx)
 
     def valid_actions(self):
+        # print("Valid actions")
+        # print(get_sup_plans(self.plan))
+        # self._actions = get_sup_plans(self.plan, forced_join_type="Nested Loop")
         self._actions = get_sup_plans(self.plan)
         obs = []
         for p in self._actions:
@@ -212,7 +218,7 @@ class EnvPlanHeapRTOS(EnvPlanHeap, DataBaseEnv_RTOSEncoding):
             np.concatenate([
                 self.join_graph_encoding,
                 self.column_represenation.flatten()
-            ]).astype(np.int),
+            ]).astype(np.int32),
             to_forest(self.plan)
         )
 
@@ -248,7 +254,7 @@ class Agent(nn.Module):
             action = None
         return action, out
 
-    def train_net(self, train_data, epochs, criterion, batch_size, lr, scheduler, betas, val_data=None, val_steps=100, min_iters=1000):
+    def train_net(self, train_data, epochs, criterion, batch_size, lr, scheduler, betas, val_data=None, val_steps=100, min_iters=100):
         LOG.info(f"Start training: {time.ctime()}")
         net = self.net.new().to(device=self.device)
         net.train()
@@ -267,6 +273,7 @@ class Agent(nn.Module):
             opt, milestones=[200, 500, 1000, 1500, 2000, 2500, 3000, 3500], gamma=scheduler)
         min_val_loss = np.inf
         min_train_loss = np.inf
+        batch_size = min(batch_size, len(train_data))
         train_dl = torch.utils.data.DataLoader(
             train_data, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=self.collate_fn, num_workers=0)
         iters = max(min_iters, int(epochs*len(train_dl)))
@@ -321,7 +328,7 @@ class Agent(nn.Module):
 
 
 class Neo():
-    def __init__(self, agent, env_config, args, train_args, experience=[], baseline_plans={}):
+    def __init__(self, agent, env_config, args, train_args, experience=[], baseline_plans={}, parent_dir=None):
         self.env_config = env_config
         self.train_args = train_args
         self.env_config['return_latency'] = args['latency']
@@ -357,15 +364,17 @@ class Neo():
         if cardinality and 'cardinalities' not in env_config:
             DataBaseEnv_QueryEncoding.compute_cardinalities(self.env_config)
         self.env_plan_heap = EnvPlanHeap
+        self.parent_dir = parent_dir
 
-    def run(self):
-        runners = [mp.Process(target=self.runner_process)
-                   for _ in range(self.n_workers)]
+    def run(self, current_episode=0):
+        # Pass current_episode to each runner_process
+        runners = [mp.Process(target=self.runner_process, args=(current_episode,))
+                for _ in range(self.n_workers)]
         logger = mp.Process(target=self.logger)
         logger.start()
         for r in runners:
             r.start()
-        self.update_process()
+        self.update_process(current_episode)
         for r in runners:
             r.terminate()
         logger.terminate()
@@ -401,9 +410,12 @@ class Neo():
                             writer.add_scalar(
                                 f'Cost/{stat_type}/avg_baseline_ratio:experience', average_ratio, n_plans)
 
-    def runner_process(self):
+    def runner_process(self, current_episode=0):
         env = self.env_plan_heap(self.env_config)
         exhausted = True
+        if current_episode > 0:
+            with self.episode.get_lock():
+                self.episode.value = current_episode
         while True:
             if (exhausted or len(env.complete_plans) == self.num_complete_plans):
                 if self.episode.value >= self.total_episodes * self.n_queries:
@@ -413,7 +425,7 @@ class Neo():
                     if query_num == 0:
                         if self.sync:
                             self.step_flag.clear()
-                        np.random.shuffle(self.random_query_ids)
+                        np.random.shuffle(np.array(self.random_query_ids))
                     randomized_query_idx = self.random_query_ids[query_num]
                     env.reset(randomized_query_idx)
                     self.episode.value += 1
@@ -428,12 +440,29 @@ class Neo():
                 self.update_q.put(
                     (env.complete_plans, env.costs, len(env.min_heap), env.query_id))
 
-    def update_process(self):
+    def update_process(self, current_episode=0):
         env = self.env_plan_heap(self.env_config)
         generated_costs = {}
         baseline_costs = {q: self.experience.get_cost(
             p, q) for q, p in self.baseline_plans.items()}
         episode = 0
+        checkpoint_dir = Path(self.parent_dir).parent
+        model_dir = os.path.join(checkpoint_dir, "models/neo/asc_complexity/checkpoints")
+
+        if current_episode == 0:
+            Path(model_dir).mkdir(parents=True, exist_ok=True)
+        else:
+            episode = current_episode
+        
+        # Training history storage
+        training_history = {
+            'train_loss': [],
+            'val_loss': [],
+            'episodes': [],
+            'steps': [],
+            'timestamps': []
+        }
+        
         while True:
             if episode % self.n_queries == 0:
                 LOG.info(
@@ -446,11 +475,36 @@ class Neo():
                 np.random.shuffle(data)
                 val_split = max(1, min(self.val_size, int(0.3*len(data))))
                 train_data, val_data = data[:-val_split], data[-val_split:]
+                
+                # Train the model
                 losses = self.agent.train_net(
                     train_data=train_data, val_data=val_data, val_steps=200, criterion=nn.MSELoss(), **self.train_args)
+                
+                # Record training history
+                training_history['train_loss'].append(losses[0])
+                training_history['val_loss'].append(losses[1])
+                training_history['episodes'].append(episode)
+                training_history['steps'].append(self.step.value)
+                training_history['timestamps'].append(time.time())
+                
+                # Save checkpoint periodically (e.g., every 5*n_queries episodes)
+                if episode % (5 * self.n_queries) == 0:
+                    checkpoint_path = Path(model_dir) / f'checkpoint_ep{episode}.pt'
+                    torch.save({
+                        'episode': episode,
+                        'step': self.step.value,
+                        'model_state_dict': self.agent.net.state_dict(),
+                        'train_loss': losses[0],
+                        'val_loss': losses[1],
+                        'training_history': training_history,
+                        'experience_size': self.experience.size(),
+                    }, checkpoint_path)
+                    LOG.info(f"Checkpoint saved at episode {episode} to {checkpoint_path}")
+                
                 # allow exploring
                 self.step_flag.set()
                 self.log_q.put((losses, self.step.value))
+                
                 # save found plans
                 path = Path(self.logdir) / 'plans'
                 path.mkdir(parents=True, exist_ok=True)
@@ -461,6 +515,21 @@ class Neo():
                     f"Best plans after {episode} episodes saved to {str(path)}")
 
             if (episode >= self.total_episodes * self.n_queries):
+                # Save final model and training history
+                final_path = Path(self.logdir) / 'final_model.pt'
+                torch.save({
+                    'model_state_dict': self.agent.net.state_dict(),
+                    'training_history': training_history,
+                    'final_episode': episode,
+                    'final_step': self.step.value
+                }, final_path)
+                
+                # Also save training history separately
+                history_path = Path(self.logdir) / 'training_history.pkl'
+                with open(history_path, 'wb') as f:
+                    pickle.dump(training_history, f)
+                    
+                LOG.info(f"Final model and training history saved at {final_path}")
                 return
 
             complete_plans, costs, heap_size, query_id = self.update_q.get()
@@ -498,6 +567,22 @@ class Neo():
             if is_complete:
                 costs.append(preds[1][0])
         return env.complete_plans[np.argmin(costs)]
+
+    def generate_plan_with_prediction(self, query_id, num=1):
+        exhausted = False
+        env = self.env_plan_heap(self.env_config, track_true_reward=False)
+        env.reset(query_id)
+        costs = []
+        self.agent.eps = 0
+        predicted_latency = 0.0
+        while not exhausted and len(env.complete_plans) < num:
+            sup_plans = env.valid_actions()
+            preds = self.agent.predict(sup_plans)
+            _, _, is_complete, exhausted = env.step(*preds)
+            if is_complete:
+                predicted_latency = preds[1][0]
+                costs.append(preds[1][0])
+        return env.complete_plans[np.argmin(costs)], predicted_latency
 
     def generate_plan_beam_search(self, query_id, num=1):
         is_done = False

@@ -215,8 +215,18 @@ class Plan():
         m = {n: i for i, n in enumerate(self.G.nodes)}
         g = nx.relabel_nodes(self.G, m)
         exception_attrs = ['tables', 'tab_entries', 'feature']
-        _joins = [(tuple(g[n]), {k: v for k, v in g.nodes[n].items() if k not in exception_attrs})
-                  for n in g.nodes() if n >= len(self.query_tables)]
+        # First identify which nodes are actual joins
+        join_nodes = [
+            n for n in g.nodes() 
+            if n >= len(self.query_tables) 
+            and isinstance(g.nodes[n].get('join_type'), str)  # Positive join_type check
+        ]
+        # Then build the joins list
+        _joins = [
+            (tuple(g[n]), 
+            {k: v for k, v in g.nodes[n].items() if k not in exception_attrs})
+            for n in join_nodes
+        ]
         with open(path, "w") as f:
             json.dump([self.query_tables, self.alias_to_table,
                        self.query_join_conditions, self.initial_query, _joins], f)
@@ -267,7 +277,7 @@ def render(graph, labels={}, dpi=100):
     ))
 
 
-def get_sup_plans(p):
+def get_sup_plans(p, forced_join_type=None):
     """
     Get plans that can be build with joins from p given conditions.
     """
@@ -277,7 +287,8 @@ def get_sup_plans(p):
     for (n1, n2) in pairs:
         if p.is_inner_join(n1, n2):
             new_p = deepcopy(p)
-            new_p.join(n1, n2)
+            join_kwargs = {'join_type': forced_join_type} if forced_join_type else {}
+            new_p.join(n1, n2,  **join_kwargs)
             plans.append(new_p)
     return plans
 

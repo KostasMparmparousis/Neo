@@ -48,8 +48,7 @@ class PlanExperience():
     Each subplan S has a value equal the minimum of values of stored complete plans for which S is an actial subplan.
     Can be used with Neo.
     """
-
-    def __init__(self, initial_exp=[], add_sub_plans=True):
+    def __init__(self, initial_exp=[], add_sub_plans=False):
         self.complete_plans = defaultdict(
             Estimate.new)  # {(plan1, query): cost1,...}
         self.subplans = defaultdict(
@@ -86,9 +85,10 @@ class PlanExperience():
         return {q: x[0] for q, x in self.best_plans.items()}
 
     def get_dataset(self):
-        return [(p, v, q) for (p, q), e in self.subplans.items() for v in e.t]
-
-
+        if self.add_sub_plans:
+            return [(p, v, q) for (p, q), e in self.subplans.items() for v in e.t]
+        else:
+            return [(p, v, q) for (p, q), e in self.complete_plans.items() for v in e.t]
 
 class PlanExperienceRW(PlanExperience):
     def get_dataset(self):
@@ -100,9 +100,6 @@ class PlanExperienceRW(PlanExperience):
             scale = 1/(num_step+1)
             ds.extend((p,scale*v,q) for v in e.t)
         return ds
-
-
-
 
 # context manager for evaluating
 @contextmanager

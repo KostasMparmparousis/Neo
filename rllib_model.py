@@ -24,7 +24,7 @@ class CustomMaskedActModel(TorchModelV2, torch.nn.Module):
         true_obs_shape=model_config['custom_model_config']['true_obs_shape']
         fc_obs_space = Box(low = 0, high = 1,
                            shape = true_obs_shape,
-                           dtype = np.int)
+                           dtype = np.int32)
         self.fc_net = FullyConnectedNetwork(fc_obs_space,
                                             action_space,
                                             num_outputs,

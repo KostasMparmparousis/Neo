@@ -15,7 +15,7 @@ SEED = 123
 
 logging.basicConfig(level=logging.DEBUG)
 LOG = logging.getLogger(__name__)
-MODEL_DIR = "/data/hdd1/users/kmparmp/models/neo/job_added_index"
+MODEL_DIR = "/data/hdd1/users/kmparmp/experiment2/job/train/leave_one_out/models/neo/asc_complexity/checkpoints/"
 CHECKPOINT_PATH = os.path.join(MODEL_DIR, "checkpoint_ep2260.pt")  # Last checkpoint
 
 def load_model(checkpoint_path, config, env_config, device='cuda', experience=None, baseline_plans=None):
@@ -43,11 +43,14 @@ if __name__ == '__main__':
     parser.add_argument("queries_dir", help="Path to queries directory")
     parser.add_argument("config_path", help="Path to model config file")
     parser.add_argument("--retrain", action='store_true', help="Retrain the model")
+    parser.add_argument("--fileorder", default=None, help="Path to .txt file specifying query order")
     args = parser.parse_args()
     # Use cuda if available
     device = torch.device( "cuda" if torch.cuda.is_available() else "cpu" )
     
-    env_config = generate_final_json(args.queries_dir, conn)
+    env_config = generate_final_json(args.queries_dir, conn, fileorder=args.fileorder)
+    parent_dir = os.path.dirname(args.queries_dir)
+    
     
     # Write the json to the config file
     with open("config/pg_job_config.json", "w") as f:
@@ -64,7 +67,7 @@ if __name__ == '__main__':
     env_config['db_data'] = {
         k: v for k, v in env_config['db_data'].items()}
 
-    output_dir = Path("runs/job_added_index/postgresql/optimizer")
+    output_dir = Path("runs/job_random_ascending_complexity/postgresql/optimizer")
     # Empty the directory if it exists
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -141,7 +144,7 @@ if __name__ == '__main__':
     random.seed(SEED)
     np.random.seed(SEED)
     
-    if CHECKPOINT_PATH and args.retrain:
+    if args.retrain and CHECKPOINT_PATH:
         print("Loading checkpoint and retraining...")
         neo = load_model(CHECKPOINT_PATH, config, env_config, device, experience, baseline_plans)
         checkpoint_episode = CHECKPOINT_PATH.split('_')[-1].split('.')[0]
@@ -153,5 +156,5 @@ if __name__ == '__main__':
         agent = Agent(NeoTreeConvNet(**config['net_args']), collate_fn=collate,
                         device=config['neo_args']['device'])
         alg = Neo(agent, env_config, config['neo_args'],
-                config['train_args'], experience, baseline_plans)
+                config['train_args'], experience, baseline_plans, parent_dir=parent_dir)
         alg.run()

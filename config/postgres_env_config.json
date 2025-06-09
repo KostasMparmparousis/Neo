@@ -1,5 +1,5 @@
 {
-   "psycopg_connect_url":"postgres://imdb:password@01.23.45.67:5432/imdb",
+   "psycopg_connect_url":"postgres://suite_user:71Vgfi4mUNPm@train.darelab.athenarc.gr:5468/imdbload",
    "db":"postgres",
    "join_types":[
       "HashJoin",

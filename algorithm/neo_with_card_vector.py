@@ -484,7 +484,7 @@ class Neo():
                     if query_num == 0:
                         if self.sync:
                             self.step_flag.clear()
-                        np.random.shuffle(self.random_query_ids)
+                        np.random.shuffle(np.array(self.random_query_ids))
                     randomized_query_idx = self.random_query_ids[query_num]
                     env.reset(randomized_query_idx)
                     self.episode.value += 1
