@@ -5,6 +5,9 @@ from utils.db_utils import explain_plan_parser_augmented
 from collections import defaultdict, OrderedDict
 from copy import deepcopy
 from pathlib import Path
+REPO_ROOT = Path(__file__).resolve()
+while REPO_ROOT.name != "Learned-Optimizers-Benchmarking-Suite" and REPO_ROOT.parent != REPO_ROOT:
+    REPO_ROOT = REPO_ROOT.parent
 
 import psycopg2
 from moz_sql_parser import parse
@@ -133,7 +136,7 @@ def build_and_save_optimizer_plans_augmented(env_config, path):
 # Main function to generate and save query plans with different settings
 def main():
     # Database connection
-    env_config_path = '/data/hdd1/users/kmparmp/Neo/config/postgres_env_config.json'
+    env_config_path = f'{REPO_ROOT}/optimizers/Neo/config/postgres_env_config.json'
     with open(env_config_path, "r") as f:
         env_config = json.load(f)
 

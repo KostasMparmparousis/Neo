@@ -13,11 +13,15 @@ from algorithm.neo import *
 from model import *
 from sql_parser.generate_query_json import *
 from sql_parser.config import *
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve()
+while REPO_ROOT.name != "Learned-Optimizers-Benchmarking-Suite" and REPO_ROOT.parent != REPO_ROOT:
+    REPO_ROOT = REPO_ROOT.parent
 
 # Configuration
-MODEL_DIR = "/data/hdd1/users/kmparmp/models/neo/job"
+MODEL_DIR = f'{REPO_ROOT}/models/neo/job'
 CHECKPOINT_PATH = os.path.join(MODEL_DIR, "checkpoint_ep11300.pt")  # Last checkpoint
-RESULTS_DIR = "/data/hdd1/users/kmparmp/models/neo/test_results"
+RESULTS_DIR = f'{REPO_ROOT}/models/neo/test_results'
 SEED = 123
 
 # Setup logging

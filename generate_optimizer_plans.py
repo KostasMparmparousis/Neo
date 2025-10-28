@@ -2,6 +2,10 @@ import sys
 from database_env import *
 from algorithm.neo import *
 from model import *
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve()
+while REPO_ROOT.name != "Learned-Optimizers-Benchmarking-Suite" and REPO_ROOT.parent != REPO_ROOT:
+    REPO_ROOT = REPO_ROOT.parent
 
 SEED = 123
 
@@ -13,7 +17,7 @@ if __name__ == '__main__':
     np.random.seed(123)
     torch.manual_seed(123)
 
-    env_config_path = '/data/hdd1/users/kmparmp/Neo/config/postgres_job_config.json'
+    env_config_path = f'{REPO_ROOT}/optimizers/Neo/config/postgres_job_config.json'
     with open(env_config_path, "r") as f:
         env_config = json.load(f)
 

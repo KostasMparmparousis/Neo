@@ -419,6 +419,10 @@ def generate_final_json(queries_dir: str, conn, test_size: float = 0.0, fileorde
     
     return final_json
 
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve()
+while REPO_ROOT.name != "Learned-Optimizers-Benchmarking-Suite" and REPO_ROOT.parent != REPO_ROOT:
+    REPO_ROOT = REPO_ROOT.parent
 
 # Example usage:
 if __name__ == "__main__":
@@ -427,12 +431,12 @@ if __name__ == "__main__":
         # Establish database connection
         conn = psycopg2.connect(DB_URL)
         
-        # Generate the final JSON
-        queries_directory = "/data/hdd1/users/kmparmp/workloads/imdb_pg_dataset/job"
+        # Generate the final JSON.
+        queries_directory = f'{REPO_ROOT}/workloads/imdb_pg_dataset/job'
         output_json = generate_final_json(queries_directory, conn)
         
         # Save to file
-        with open("/data/hdd1/users/kmparmp/Neo/config/postgres_job_config_alt.json", "w") as f:
+        with open(f'{REPO_ROOT}/Neo/config/postgres_job_config_alt.json', "w") as f:
             json.dump(output_json, f, indent=4)
         
         print("JSON output with dynamic schema generated successfully!")

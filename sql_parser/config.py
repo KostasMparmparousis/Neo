@@ -1,6 +1,23 @@
 # config.py
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 import pandas as pd
+
+def load_repo_env():
+    """Load the .env file from the Learned-Optimizers-Benchmarking-Suite root."""
+    current_dir = Path(__file__).resolve().parent
+    while True:
+        env_path = current_dir / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+            break
+        if current_dir.parent == current_dir:
+            raise FileNotFoundError(".env file not found in any parent directories.")
+        current_dir = current_dir.parent
+
+load_repo_env()
 
 # Database schema (for reference)
 TABLES = {
@@ -29,20 +46,29 @@ TABLES = {
 
 # Database connection parameters
 DB_CONFIG = {
-    'dbname': 'imdbload',
-    'user': 'suite_user',
-    'password': '71Vgfi4mUNPm',
-    'host': 'train.darelab.athenarc.gr',
-    'port': 5469
+    "dbname": os.getenv("DB_NAME", "imdbload"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASS", ""),
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": int(os.getenv("DB_PORT", 5432)),
 }
 
-query_directory = "/data/hdd1/users/kmparmp/workloads/job"
+DB_URL = (
+    f"postgresql+psycopg2://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+    f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}"
+)
+
+REPO_ROOT = Path(__file__).resolve()
+while REPO_ROOT.name != "Learned-Optimizers-Benchmarking-Suite" and REPO_ROOT.parent != REPO_ROOT:
+    REPO_ROOT = REPO_ROOT.parent
+
+# Relative to the repo root
+query_directory = REPO_ROOT / "workloads" / "imdb_pg_dataset" / "job"
 
 def connect_to_db():
     """Connect to the PostgreSQL database using SQLAlchemy."""
     try:
-        db_url = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}"        
-        engine = create_engine(db_url)
+        engine = create_engine(DB_URL)
         conn = engine.connect()
         return conn
     except Exception as e:
@@ -52,8 +78,7 @@ def connect_to_db():
 def get_alchemy_engine():
     """Connect to the PostgreSQL database using SQLAlchemy."""
     try:
-        db_url = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['dbname']}"        
-        engine = create_engine(db_url)
+        engine = create_engine(DB_URL)
         return engine
     except Exception as e:
         print(f"Error connecting to the database: {e}")

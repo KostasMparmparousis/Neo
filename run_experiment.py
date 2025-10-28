@@ -10,12 +10,16 @@ import pickle
 from sql_parser.generate_query_json import *
 from sql_parser.config import *
 import json
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve()
+while REPO_ROOT.name != "Learned-Optimizers-Benchmarking-Suite" and REPO_ROOT.parent != REPO_ROOT:
+    REPO_ROOT = REPO_ROOT.parent
 
 SEED = 123
 
 logging.basicConfig(level=logging.DEBUG)
 LOG = logging.getLogger(__name__)
-MODEL_DIR = "/data/hdd1/users/kmparmp/models/neo/job_added_index"
+MODEL_DIR = f'{REPO_ROOT}/models/neo/job_added_index'
 CHECKPOINT_PATH = os.path.join(MODEL_DIR, "checkpoint_ep2260.pt")  # Last checkpoint
 
 def load_model(checkpoint_path, config, env_config, device='cuda', experience=None, baseline_plans=None):
